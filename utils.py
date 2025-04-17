@@ -91,8 +91,24 @@ def get_url_type(url):
         query = urllib.parse.parse_qs(parsed_url.query)
         if 'aweme_type' in query and query['aweme_type'][0] == '150':
             return ('slideshow', 'tiktok')
-        if 'pic_cnt' in query and int(query['pic_cnt'][0]) > 0:
-            return ('slideshow', 'tiktok')
+        
+        if 'pic_cnt' in query:
+            try:
+                pic_count = int(query['pic_cnt'][0])
+                if pic_count > 0:
+                    return ('slideshow', 'tiktok')
+            except (ValueError, IndexError):
+                # If pic_cnt is present but not a valid number or empty, it might still be a slideshow
+                if query['pic_cnt'][0] != '0':
+                    return ('slideshow', 'tiktok')
+        
+        # Also check for 'share_item_id' which can indicate a collection of images
+        if 'share_item_id' in query:
+            # If this URL has a share_item_id, we need to check if it's a slideshow
+            # We'll rely on the is_tiktok_slideshow function in media_downloader for the detailed check
+            # Here we do a simple check for obvious indicators
+            if 'photo' in url.lower() or 'image' in url.lower() or 'slideshow' in url.lower():
+                return ('slideshow', 'tiktok')
             
         # Default to regular video
         return ('video', 'tiktok')

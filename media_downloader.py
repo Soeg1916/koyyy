@@ -11,6 +11,9 @@ import tempfile
 import yt_dlp
 import re
 import requests
+import json
+import time
+import shutil
 from bs4 import BeautifulSoup
 from utils import sanitize_filename
 
@@ -55,6 +58,24 @@ async def is_tiktok_slideshow(url):
     Returns:
         bool: True if it's a slideshow, False otherwise
     """
+    # First, normalize the URL if it's shortened
+    try:
+        if ('vm.tiktok.com' in url.lower() or 
+            'vt.tiktok.com' in url.lower() or 
+            'www.tiktok.com' not in url.lower()):
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+            }
+            response = requests.head(url, headers=headers, allow_redirects=True)
+            if response.status_code == 200:
+                url = response.url
+                logger.info(f"Resolved URL to: {url}")
+    except Exception as e:
+        logger.warning(f"Error following TikTok redirect: {e}")
+    
+    # Parse the URL
     parsed_url = urllib.parse.urlparse(url)
     if 'tiktok' not in parsed_url.netloc.lower():
         return False
@@ -63,18 +84,96 @@ async def is_tiktok_slideshow(url):
     path = parsed_url.path.lower()
     query = urllib.parse.parse_qs(parsed_url.query)
     
-    # Check for photo URL pattern (contains /photo/ in path)
+    # Method 1: Check for photo URL pattern (contains /photo/ in path)
     if '/photo/' in path:
+        logger.info("Detected TikTok slideshow by path: /photo/")
         return True
-        
+    
+    # Method 2: Check URL parameters that indicate a slideshow    
     # Check for aweme_type=150 parameter (TikTok photo posts)
     if 'aweme_type' in query and query['aweme_type'][0] == '150':
+        logger.info("Detected TikTok slideshow by aweme_type=150")
         return True
         
     # Check for pic_cnt parameter which indicates multiple photos
-    if 'pic_cnt' in query and int(query['pic_cnt'][0]) > 0:
-        return True
-        
+    if 'pic_cnt' in query:
+        try:
+            if query['pic_cnt'][0] != '0':
+                pic_count = int(query['pic_cnt'][0])
+                if pic_count > 0:
+                    logger.info(f"Detected TikTok slideshow by pic_cnt={pic_count}")
+                    return True
+        except (ValueError, TypeError, IndexError):
+            # If pic_cnt is present but not a valid number, it might still be a slideshow
+            logger.info("Detected possible TikTok slideshow by non-numeric pic_cnt")
+            return True
+    
+    # Method 3: Check the content of the page for slideshow indicators
+    # For URLs that don't have obvious indicators in URL, need to check page content
+    try:
+        # Let's try to fetch the page content
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Referer': 'https://www.tiktok.com/',
+        }
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            # Check for various indicators in the HTML that suggest it's a slideshow
+            html_indicators = [
+                'photo-mode', 'photoMode', 
+                'photoCarousel', 'photo-carousel',
+                'multiImage', 'multi-image',
+                'image-poster', 'imagePoster',
+                'slideshow', 'slide-show',
+                'carousel-container', 'imageContainer',
+                'photo_mode', 'photoSwiper',
+                'gallery-wrapper'
+            ]
+            
+            for indicator in html_indicators:
+                if indicator in response.text:
+                    logger.info(f"Detected TikTok slideshow by {indicator} in HTML")
+                    return True
+            
+            # Look for specific HTML structures that indicate a slideshow
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Check for img tags that could be part of a slideshow
+            slideshow_img_count = 0
+            for img in soup.find_all('img'):
+                # If there are multiple images with similar classes/structure, might be a slideshow
+                if 'data-src' in img.attrs or 'carousel' in str(img).lower() or 'slide' in str(img).lower():
+                    slideshow_img_count += 1
+                    if slideshow_img_count >= 2:  # If we find at least 2 slideshow-like images
+                        logger.info("Detected TikTok slideshow by multiple carousel-style images in HTML")
+                        return True
+            
+            # Look for JSON data in scripts that might indicate a slideshow
+            for script in soup.find_all('script'):
+                if script.string and any(x in script.string for x in ['imageList', 'imageMode', 'images":', 'photoIds']):
+                    logger.info("Detected TikTok slideshow by image-related data in script")
+                    return True
+                    
+            # Fallback: If the page has 'photo' in its content multiple times, it might be a slideshow
+            if response.text.lower().count('photo') > 5 or response.text.lower().count('image') > 10:
+                logger.info("Detected possible TikTok slideshow by frequency of 'photo' or 'image' mentions in HTML")
+                return True
+                
+            # Check for meta tags that might indicate a slideshow
+            meta_tags = soup.find_all('meta')
+            image_meta_count = 0
+            for meta in meta_tags:
+                if 'content' in meta.attrs and meta['content'].startswith('http') and 'image' in str(meta).lower():
+                    image_meta_count += 1
+                    if image_meta_count >= 2:  # If we find at least 2 image-related meta tags
+                        logger.info("Detected TikTok slideshow by multiple image meta tags")
+                        return True
+    except Exception as e:
+        logger.warning(f"Error checking TikTok page content: {e}")
+    
+    # If we reach this point, it's probably a regular video
     return False
     
 async def download_tiktok_slideshow(url):
@@ -121,34 +220,162 @@ async def download_tiktok_slideshow(url):
         # Parse the HTML to extract image URLs and audio URL
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Try to extract image URLs from JSON data embedded in the page
-        json_data = None
-        for script in soup.find_all('script'):
-            if script.string and 'window.__INIT_PROPS__' in script.string:
-                try:
-                    import json
-                    start_idx = script.string.find('{')
-                    end_idx = script.string.rfind('}') + 1
-                    if start_idx >= 0 and end_idx > start_idx:
-                        json_text = script.string[start_idx:end_idx]
-                        json_data = json.loads(json_text)
-                        break
-                except Exception as e:
-                    logger.warning(f"Failed to parse JSON data: {e}")
-        
-        # Extract image URLs from meta tags if JSON extraction failed
+        # Try multiple methods to extract image URLs from the page
         image_urls = []
-        if not json_data:
-            for meta in soup.find_all('meta', property='og:image'):
-                if 'content' in meta.attrs:
-                    image_urls.append(meta['content'])
         
-        # Extract audio URL
+        # Method 1: Extract from meta tags
+        for meta in soup.find_all('meta', property='og:image'):
+            if 'content' in meta.attrs and meta['content'] not in image_urls:
+                image_urls.append(meta['content'])
+                logger.info(f"Found image URL in meta tag: {meta['content']}")
+        
+        # Method 2: Try to extract from JSON data embedded in the page
+        for script in soup.find_all('script'):
+            if script.string:
+                # Look for various patterns in TikTok's JavaScript data
+                patterns = [
+                    'window.__INIT_PROPS__', 
+                    'window.SIGI_STATE', 
+                    'window.__NEXT_DATA__',
+                    '"images":', 
+                    '"imageList":', 
+                    '"imagePostInfo":'
+                ]
+                
+                for pattern in patterns:
+                    if pattern in script.string:
+                        try:
+                            import json
+                            import re
+                            
+                            # Try to find JSON data in the script
+                            json_matches = re.findall(r'(\{.*\})', script.string)
+                            for json_text in json_matches:
+                                try:
+                                    data = json.loads(json_text)
+                                    
+                                    # Search for image URLs in the JSON structure
+                                    def extract_image_urls(obj, found_urls=None):
+                                        if found_urls is None:
+                                            found_urls = []
+                                        
+                                        if isinstance(obj, dict):
+                                            # Check for common keys that might contain image URLs
+                                            for key in ['images', 'imageList', 'imagePostInfo', 'imageUrl', 'displayImage', 'thumbnailUrl']:
+                                                if key in obj and isinstance(obj[key], list):
+                                                    for item in obj[key]:
+                                                        if isinstance(item, str) and item.startswith('http') and 'image' in item.lower():
+                                                            if item not in found_urls:
+                                                                found_urls.append(item)
+                                                                logger.info(f"Found image URL in JSON data (list): {item}")
+                                                elif key in obj and isinstance(obj[key], str) and obj[key].startswith('http'):
+                                                    if obj[key] not in found_urls:
+                                                        found_urls.append(obj[key])
+                                                        logger.info(f"Found image URL in JSON data (string): {obj[key]}")
+                                            
+                                            # Recursively search in all dictionary values
+                                            for value in obj.values():
+                                                extract_image_urls(value, found_urls)
+                                        
+                                        elif isinstance(obj, list):
+                                            # Recursively search in all list items
+                                            for item in obj:
+                                                extract_image_urls(item, found_urls)
+                                        
+                                        return found_urls
+                                    
+                                    # Extract image URLs from JSON
+                                    found_urls = extract_image_urls(data)
+                                    for url in found_urls:
+                                        if url not in image_urls:
+                                            image_urls.append(url)
+                                except:
+                                    # Skip invalid JSON
+                                    pass
+                        except Exception as e:
+                            logger.warning(f"Failed to parse JSON data: {e}")
+        
+        # Method 3: Look for image URLs in srcset attributes
+        for img in soup.find_all('img'):
+            if 'src' in img.attrs and img['src'].startswith('http'):
+                if img['src'] not in image_urls:
+                    image_urls.append(img['src'])
+                    logger.info(f"Found image URL in img src: {img['src']}")
+            
+            if 'srcset' in img.attrs:
+                # Parse the srcset attribute which contains multiple URL-size pairs
+                srcset_urls = img['srcset'].split(',')
+                for srcset_url in srcset_urls:
+                    parts = srcset_url.strip().split(' ')
+                    if parts and parts[0].startswith('http'):
+                        if parts[0] not in image_urls:
+                            image_urls.append(parts[0])
+                            logger.info(f"Found image URL in srcset: {parts[0]}")
+        
+        # Method 4: Look for urls in background-image styles
+        for element in soup.find_all(style=True):
+            style = element['style']
+            if 'background-image' in style and 'url(' in style:
+                matches = re.findall(r'url\([\'"]?(.*?)[\'"]?\)', style)
+                for match in matches:
+                    if match.startswith('http') and match not in image_urls:
+                        image_urls.append(match)
+                        logger.info(f"Found image URL in background-image: {match}")
+        
+        # If we still don't have images, try a more aggressive approach
+        if not image_urls:
+            logger.info("No images found with initial methods, trying more aggressive approach")
+            # Look for any URLs in the HTML that might be images
+            try:
+                url_pattern = r'(https?://[^\s\'"\)]+\.(jpg|jpeg|png|webp))'
+                matches = re.findall(url_pattern, response.text)
+                for match in matches:
+                    full_url = match[0]  # Get the full URL from the match
+                    if full_url not in image_urls:
+                        image_urls.append(full_url)
+                        logger.info(f"Found image URL with regex: {full_url}")
+            except Exception as e:
+                logger.warning(f"Error extracting image URLs with regex: {e}")
+        
+        # Extract audio URL - try multiple methods
         audio_url = None
+        # Method 1: Check meta tags
         for meta in soup.find_all('meta', property='og:audio'):
             if 'content' in meta.attrs:
                 audio_url = meta['content']
+                logger.info(f"Found audio URL in meta tag: {audio_url}")
                 break
+        
+        # Method 2: Look for audio tags
+        if not audio_url:
+            for audio in soup.find_all('audio'):
+                if 'src' in audio.attrs and audio['src'].startswith('http'):
+                    audio_url = audio['src']
+                    logger.info(f"Found audio URL in audio tag: {audio_url}")
+                    break
+        
+        # Method 3: Look for audio URLs in the page source
+        if not audio_url:
+            audio_patterns = [
+                r'(https?://[^\s\'"\)]+\.(mp3|m4a|aac|wav))',
+                r'"musicUrl"\s*:\s*"([^"]+)"',
+                r'"audioUrl"\s*:\s*"([^"]+)"',
+                r'"audio_url"\s*:\s*"([^"]+)"',
+                r'"music":[^}]*"playUrl"\s*:\s*"([^"]+)"',
+                r'"audio":[^}]*"url"\s*:\s*"([^"]+)"',
+                r'"soundtrack":[^}]*"url"\s*:\s*"([^"]+)"'
+            ]
+            for pattern in audio_patterns:
+                matches = re.findall(pattern, response.text)
+                if matches:
+                    if isinstance(matches[0], tuple):
+                        # If the match is a tuple (from the URL pattern), get the full URL
+                        audio_url = matches[0][0]
+                    else:
+                        # For other patterns that capture just the URL in a group
+                        audio_url = matches[0]
+                    logger.info(f"Found audio URL with regex: {audio_url}")
+                    break
                 
         if not image_urls:
             logger.error("Failed to extract image URLs from TikTok page")
