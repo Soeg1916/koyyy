@@ -176,6 +176,159 @@ async def is_tiktok_slideshow(url):
     # If we reach this point, it's probably a regular video
     return False
     
+async def download_tiktok_direct(url):
+    """
+    Direct method to download TikTok videos without using yt-dlp.
+    This is a fallback when other methods fail.
+    
+    Args:
+        url (str): URL of the TikTok video
+        
+    Returns:
+        str: Path to the downloaded video file or None if download fails
+    """
+    logger.info(f"Attempting direct TikTok download for: {url}")
+    
+    try:
+        # Normalize the URL if it's shortened
+        try:
+            if 'vm.tiktok.com' in url.lower() or 'vt.tiktok.com' in url.lower():
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                }
+                response = requests.head(url, headers=headers, allow_redirects=True)
+                if response.status_code == 200:
+                    url = response.url
+                    logger.info(f"Resolved shortened URL to: {url}")
+        except Exception as e:
+            logger.warning(f"Error following TikTok redirect: {e}")
+        
+        # Multiple APIs for TikTok video download
+        apis = [
+            {
+                'name': 'snaptik',
+                'url': 'https://snaptik.app/api/ajaxSearch',
+                'method': 'POST',
+                'data': {'url': url},
+                'pattern': r'(https:\/\/[^"\']+\.mp4[^"\']*)(?="|\')(?!.*watermark)'
+            },
+            {
+                'name': 'tikmate',
+                'url': 'https://tikmate.app/api/lookup',
+                'method': 'POST',
+                'data': {'url': url},
+                'pattern': r'(https:\/\/tikmate\.app\/download\/\w+\.mp4)(?="|\')(?!.*watermark)'
+            },
+            {
+                'name': 'ssstik',
+                'url': 'https://ssstik.io/abc?url=dl',
+                'method': 'POST',
+                'data': {'id': url, 'locale': 'en', 'tt': 'azbjzm'},
+                'headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Origin': 'https://ssstik.io',
+                    'Referer': 'https://ssstik.io/en'
+                },
+                'pattern': r'href="(https:\/\/[^"\']+\.mp4[^"\']*)(?="|\')(?!.*watermark)'
+            }
+        ]
+        
+        for api in apis:
+            try:
+                logger.info(f"Trying {api['name']} API for TikTok direct download...")
+                headers = api.get('headers', {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                })
+                
+                if api['method'] == 'POST':
+                    response = requests.post(api['url'], data=api['data'], headers=headers, timeout=30)
+                else:
+                    response = requests.get(api['url'], params=api['data'], headers=headers, timeout=30)
+                
+                if response.status_code == 200:
+                    # Search for download URL in response
+                    import re
+                    matches = re.findall(api['pattern'], response.text)
+                    if matches:
+                        download_url = matches[0]
+                        logger.info(f"Found direct download URL via {api['name']} API: {download_url}")
+                        
+                        # Download the video
+                        import time
+                        timestamp = int(time.time())
+                        output_path = os.path.join(DOWNLOAD_DIR, f"tiktok_direct_{timestamp}.mp4")
+                        
+                        # Use a streaming download to handle large files
+                        with requests.get(download_url, stream=True, headers=headers, timeout=60) as dl_response:
+                            dl_response.raise_for_status()
+                            with open(output_path, 'wb') as f:
+                                for chunk in dl_response.iter_content(chunk_size=8192):
+                                    f.write(chunk)
+                        
+                        logger.info(f"Successfully downloaded TikTok video directly to {output_path}")
+                        return output_path
+            except Exception as e:
+                logger.warning(f"Error using {api['name']} API: {e}")
+                continue
+        
+        # If all APIs fail, try downloading directly from the TikTok page
+        try:
+            logger.info("Trying direct extraction from TikTok page...")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9',
+            }
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                # Look for video URLs in the page
+                video_patterns = [
+                    r'(https:\/\/[^"\'\s]+\.mp4[^"\'\s]*)(?=[\s"\'<])',
+                    r'playAddr":"(https:\/\/[^"]+\.mp4[^"]*)"',
+                    r'playAddr:[ ]*"([^"]+)"',
+                    r'"video":[ ]*{"id":"[^"]+","url":"([^"]+)"',
+                ]
+                
+                for pattern in video_patterns:
+                    matches = re.findall(pattern, response.text)
+                    if matches:
+                        for match in matches:
+                            try:
+                                download_url = match.replace('\\u002F', '/').replace('\\/', '/')
+                                logger.info(f"Found direct video URL in TikTok page: {download_url}")
+                                
+                                # Download the video
+                                import time
+                                timestamp = int(time.time())
+                                output_path = os.path.join(DOWNLOAD_DIR, f"tiktok_page_{timestamp}.mp4")
+                                
+                                # Use a streaming download to handle large files
+                                with requests.get(download_url, stream=True, headers=headers, timeout=60) as dl_response:
+                                    if dl_response.status_code == 200:
+                                        with open(output_path, 'wb') as f:
+                                            for chunk in dl_response.iter_content(chunk_size=8192):
+                                                f.write(chunk)
+                                        
+                                        if os.path.getsize(output_path) > 10000:  # Make sure it's not an empty or tiny file
+                                            logger.info(f"Successfully downloaded TikTok video from page to {output_path}")
+                                            return output_path
+                            except Exception as e:
+                                logger.warning(f"Error downloading from extracted URL: {e}")
+                                continue
+        except Exception as e:
+            logger.warning(f"Error during direct page extraction: {e}")
+        
+        logger.error("All direct TikTok download methods failed")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error in direct TikTok download: {e}")
+        return None
+
 async def download_tiktok_slideshow(url):
     """
     Download a TikTok slideshow (photo post) and convert it to a video with audio.
@@ -484,15 +637,31 @@ async def download_video(url):
     
     try:
         # First, check if this is a TikTok slideshow (image carousel)
-        if await is_tiktok_slideshow(url):
-            logger.info("Detected TikTok slideshow")
-            return await download_tiktok_slideshow(url)
+        parsed_url = urllib.parse.urlparse(url)
+        domain = parsed_url.netloc.lower()
+        
+        if 'tiktok' in domain:
+            try:
+                is_slideshow = await is_tiktok_slideshow(url)
+                if is_slideshow:
+                    logger.info("Detected TikTok slideshow, trying dedicated slideshow downloader")
+                    slideshow_result = await download_tiktok_slideshow(url)
+                    if slideshow_result and os.path.exists(slideshow_result):
+                        return slideshow_result
+                    logger.warning("Slideshow download failed, falling back to regular video download")
+            except Exception as e:
+                logger.error(f"Error in TikTok slideshow detection: {e}, continuing with regular video download")
         
         # Determine platform-specific options
         options = YDL_OPTIONS.copy()
         
-        parsed_url = urllib.parse.urlparse(url)
-        domain = parsed_url.netloc.lower()
+        # Update options with better settings for reliability
+        options.update({
+            'socket_timeout': 60,  # Increased timeout
+            'retries': 5,          # More retries
+            'fragment_retries': 10, # For segmented downloads
+            'overwrites': True     # Overwrite existing files
+        })
         
         # Special handling for TikTok
         if 'tiktok' in domain:
@@ -512,15 +681,17 @@ async def download_video(url):
                 except Exception as e:
                     logger.warning(f"Error following TikTok redirect: {e}")
             
-            # Try a different approach for TikTok - use browser simulation
+            # Try a more reliable approach for TikTok - use multiple APIs and browser simulation
             options.update({
-                # Use an alternative extractor
-                'extractor_retries': 3,
+                # Enhanced options for TikTok
+                'extractor_retries': 5,  # Increase retry attempts
+                'socket_timeout': 60,    # Increase timeout for slow connections
                 'extractor_args': {
                     'tiktok': {
-                        'embed_api': 'tikwm',  # Try different API endpoints
-                        'api_hostname': 'www.tikwm.com',
-                        'force_api_response': 'yes'
+                        'embed_api': ['tiktokv', 'ssstik', 'tikwm', 'tikmate'],  # Try multiple API endpoints
+                        'api_hostname': 'tikmate.app',  # More reliable service
+                        'force_api_response': 'yes',
+                        'force_mobile_api': 'yes'  # Try mobile API which might be more reliable
                     }
                 },
                 'referer': 'https://www.tiktok.com/',
@@ -529,7 +700,10 @@ async def download_video(url):
                     'Accept-Language': 'en-US,en;q=0.9',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                     'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1'
+                    'Upgrade-Insecure-Requests': '1',
+                    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"Windows"'
                 }
             })
             
@@ -589,11 +763,11 @@ async def download_video(url):
         loop = asyncio.get_event_loop()
         video_path = await loop.run_in_executor(None, download)
         
-        # If TikTok download failed, try a fallback method
+        # If TikTok download failed, try multiple fallback methods
         if (not video_path or not os.path.exists(video_path)) and 'tiktok' in domain:
-            logger.info("Initial TikTok download failed, trying fallback method...")
+            logger.info("Initial TikTok download failed, trying first fallback method...")
             
-            # Try fallback method with a different API
+            # Try first fallback method with a different API
             options['extractor_args']['tiktok'] = {
                 'embed_api': 'musicaldown',
                 'api_hostname': 'musicaldown.com',
@@ -601,6 +775,16 @@ async def download_video(url):
             }
             
             video_path = await loop.run_in_executor(None, download)
+            
+            # If first fallback fails, try a direct request method (bypass yt-dlp)
+            if not video_path or not os.path.exists(video_path):
+                logger.info("Second fallback: Trying direct download method for TikTok...")
+                try:
+                    direct_video_path = await download_tiktok_direct(url)
+                    if direct_video_path and os.path.exists(direct_video_path):
+                        video_path = direct_video_path
+                except Exception as e:
+                    logger.error(f"Error in direct TikTok download: {e}")
         
         if not video_path or not os.path.exists(video_path):
             logger.error(f"Download failed for {url}")
