@@ -331,13 +331,16 @@ async def download_tiktok_direct(url):
 
 async def download_tiktok_slideshow(url):
     """
-    Download a TikTok slideshow (photo post) and convert it to a video with audio.
+    Download a TikTok slideshow (photo post).
+    Instead of creating a video, this function now extracts and returns all individual images 
+    plus audio (if available) separately.
     
     Args:
         url (str): URL of the TikTok slideshow
         
     Returns:
-        str: Path to the created slideshow video or None if download fails
+        dict: Dictionary with 'images' (list of paths to image files) and 'audio' (path to audio file or None)
+              Returns None if download fails completely
     """
     logger.info(f"Downloading TikTok slideshow from: {url}")
     
@@ -569,52 +572,20 @@ async def download_tiktok_slideshow(url):
                 logger.warning(f"Error downloading audio: {e}")
                 audio_path = None
         
-        # Create a video slideshow from the images
+        # Return the images and audio without creating a video
         if not image_paths:
             logger.error("No images were successfully downloaded")
             return None
             
-        # Create a video slideshow with the images
-        # Each image will be shown for 3 seconds
-        clips = []
-        for img_path in image_paths:
-            try:
-                clip = ImageClip(img_path).set_duration(3)
-                clips.append(clip)
-            except Exception as e:
-                logger.warning(f"Error creating clip from image {img_path}: {e}")
+        # Now instead of creating a video, return the individual files
+        logger.info(f"Successfully downloaded {len(image_paths)} images and audio: {audio_path is not None}")
         
-        if not clips:
-            logger.error("Failed to create any video clips from images")
-            return None
+        result = {
+            'images': image_paths,
+            'audio': audio_path
+        }
         
-        # Combine the clips into a single video
-        video_clip = concatenate_videoclips(clips, method="compose")
-        
-        # Add audio if available
-        if audio_path and os.path.exists(audio_path):
-            try:
-                audio_clip = AudioFileClip(audio_path)
-                # Loop the audio if it's shorter than the video
-                if audio_clip.duration < video_clip.duration:
-                    audio_clip = audio_clip.loop(duration=video_clip.duration)
-                # Trim the audio if it's longer than the video
-                elif audio_clip.duration > video_clip.duration:
-                    audio_clip = audio_clip.subclip(0, video_clip.duration)
-                video_clip = video_clip.set_audio(audio_clip)
-            except Exception as e:
-                logger.warning(f"Error adding audio to video: {e}")
-        
-        # Save the final video
-        output_path = os.path.join(DOWNLOAD_DIR, f"tiktok_slideshow_{timestamp}.mp4")
-        video_clip.write_videofile(output_path, fps=24, codec='libx264', audio_codec='aac')
-        
-        # Clean up
-        video_clip.close()
-        shutil.rmtree(slideshow_dir, ignore_errors=True)
-        
-        logger.info(f"Successfully created TikTok slideshow video at {output_path}")
-        return output_path
+        return result
         
     except ImportError as e:
         logger.error(f"Required library missing: {e}")
@@ -646,8 +617,9 @@ async def download_video(url):
                 if is_slideshow:
                     logger.info("Detected TikTok slideshow, trying dedicated slideshow downloader")
                     slideshow_result = await download_tiktok_slideshow(url)
-                    if slideshow_result and os.path.exists(slideshow_result):
-                        return slideshow_result
+                    if slideshow_result and isinstance(slideshow_result, dict):
+                        # Return dictionary with images and audio for separate handling by the bot
+                        return {'type': 'slideshow', 'data': slideshow_result}
                     logger.warning("Slideshow download failed, falling back to regular video download")
             except Exception as e:
                 logger.error(f"Error in TikTok slideshow detection: {e}, continuing with regular video download")
