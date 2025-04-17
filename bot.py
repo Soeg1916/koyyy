@@ -201,13 +201,18 @@ def create_bot(token):
                         if download_result:
                             logger.info(f"Downloaded Pinterest video to {download_result}")
                 elif platform == 'tiktok' and media_type == 'slideshow':
-                    # For TikTok slideshows, use the regular video download function with our new handling
-                    download_result = loop.run_until_complete(download_video(url))
-                    if download_result:
-                        if isinstance(download_result, dict) and download_result.get('type') == 'slideshow':
-                            logger.info(f"Downloaded TikTok slideshow as separate images and audio")
-                        else:
-                            logger.info(f"Downloaded TikTok slideshow to {download_result}")
+                    # For TikTok slideshows, use the dedicated slideshow download function
+                    from media_downloader import download_tiktok_slideshow
+                    logger.info("Using dedicated TikTok slideshow downloader")
+                    slideshow_result = loop.run_until_complete(download_tiktok_slideshow(url))
+                    if slideshow_result:
+                        download_result = {'type': 'slideshow', 'data': slideshow_result}
+                        logger.info(f"Downloaded TikTok slideshow as separate images and audio")
+                    else:
+                        logger.error("TikTok slideshow download failed")
+                        bot.edit_message_text("❌ Failed to download the TikTok slideshow. The content may be private or no longer available.", 
+                                           message.chat.id, status_message.message_id)
+                        return
                 else:
                     # Default to video download for all other platforms
                     download_result = loop.run_until_complete(download_video(url))

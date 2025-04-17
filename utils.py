@@ -85,29 +85,60 @@ def get_url_type(url):
     elif 'tiktok' in domain:
         # Check for TikTok photo/slideshow indicators
         if '/photo/' in path:
+            logger.info("Detected TikTok slideshow by URL path: /photo/")
             return ('slideshow', 'tiktok')
         
         # Check query parameters
         query = urllib.parse.parse_qs(parsed_url.query)
         if 'aweme_type' in query and query['aweme_type'][0] == '150':
+            logger.info("Detected TikTok slideshow by aweme_type=150")
             return ('slideshow', 'tiktok')
         
         if 'pic_cnt' in query:
             try:
                 pic_count = int(query['pic_cnt'][0])
                 if pic_count > 0:
+                    logger.info(f"Detected TikTok slideshow by pic_cnt={pic_count}")
                     return ('slideshow', 'tiktok')
             except (ValueError, IndexError):
                 # If pic_cnt is present but not a valid number or empty, it might still be a slideshow
-                if query['pic_cnt'][0] != '0':
+                if query.get('pic_cnt', ['0'])[0] != '0':
+                    logger.info("Detected possible TikTok slideshow by non-numeric pic_cnt")
                     return ('slideshow', 'tiktok')
+        
+        # TikTok short link resolution - need to check the actual URL after redirection
+        if 'vm.tiktok.com' in domain or 'vt.tiktok.com' in domain:
+            logger.info("TikTok short URL detected, checking if it's a slideshow...")
+            try:
+                import requests
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                }
+                response = requests.head(url, headers=headers, allow_redirects=True)
+                if response.status_code == 200:
+                    full_url = response.url
+                    parsed_full = urllib.parse.urlparse(full_url)
+                    if '/photo/' in parsed_full.path.lower():
+                        logger.info("Detected TikTok slideshow after short URL resolution")
+                        return ('slideshow', 'tiktok')
+                    
+                    # Check query parameters of the resolved URL
+                    full_query = urllib.parse.parse_qs(parsed_full.query)
+                    if 'aweme_type' in full_query and full_query['aweme_type'][0] == '150':
+                        logger.info("Detected TikTok slideshow after URL resolution")
+                        return ('slideshow', 'tiktok')
+                    
+                    if 'pic_cnt' in full_query and full_query.get('pic_cnt', ['0'])[0] != '0':
+                        logger.info("Detected TikTok slideshow after URL resolution (has pic_cnt)")
+                        return ('slideshow', 'tiktok')
+            except Exception as e:
+                logger.warning(f"Error resolving TikTok short URL: {e}")
         
         # Also check for 'share_item_id' which can indicate a collection of images
         if 'share_item_id' in query:
-            # If this URL has a share_item_id, we need to check if it's a slideshow
-            # We'll rely on the is_tiktok_slideshow function in media_downloader for the detailed check
-            # Here we do a simple check for obvious indicators
+            # If this URL has a share_item_id, we need additional checks
             if 'photo' in url.lower() or 'image' in url.lower() or 'slideshow' in url.lower():
+                logger.info("Detected TikTok slideshow by keywords in URL")
                 return ('slideshow', 'tiktok')
             
         # Default to regular video
