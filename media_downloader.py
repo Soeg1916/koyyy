@@ -1,6 +1,7 @@
 """
 Media downloader for various social media platforms.
 Handles downloading videos from TikTok, Instagram, YouTube Shorts, and Pinterest.
+Also supports downloading images from Pinterest.
 """
 import os
 import logging
@@ -8,6 +9,9 @@ import asyncio
 import urllib.parse
 import tempfile
 import yt_dlp
+import re
+import requests
+from bs4 import BeautifulSoup
 from utils import sanitize_filename
 
 # Set up logging

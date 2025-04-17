@@ -11,13 +11,14 @@ import telebot
 from telebot import types
 from media_downloader import download_video
 from audio_extractor import extract_audio
+from pinterest_extractor import download_pinterest_image, download_pinterest_video
 from user_storage import (
     save_media,
     retrieve_media,
     get_user_media_list,
     initialize_user_storage,
 )
-from utils import is_valid_url, get_media_type, sanitize_filename
+from utils import is_valid_url, get_media_type, get_url_type, sanitize_filename
 
 # Set up logging
 logging.basicConfig(
@@ -50,8 +51,8 @@ def create_bot(token):
         """Handler for /start command"""
         welcome_message = (
             "👋 Welcome to Social Media Downloader Bot!\n\n"
-            "I can help you download videos from social media platforms, extract audio, and save your media.\n\n"
-            "Just send me a link to a video from TikTok, Instagram, YouTube Shorts, or Pinterest.\n\n"
+            "I can help you download videos and images from social media platforms, extract audio, and save your media.\n\n"
+            "Just send me a link to a video from TikTok, Instagram, YouTube Shorts, or Pinterest, or a link to a photo from Pinterest.\n\n"
             "Commands:\n"
             "/help - Show help information\n"
             "/list - List your saved media\n"
@@ -65,14 +66,17 @@ def create_bot(token):
         help_message = (
             "📋 Bot Instructions:\n\n"
             "1️⃣ Send a link to a video from TikTok, Instagram, YouTube Shorts, or Pinterest\n"
-            "2️⃣ I'll download and send you the video\n"
-            "3️⃣ Use the '🎵 Download Audio' button to extract audio\n"
-            "4️⃣ Use the '💾 Save' button to save media with a custom name\n"
-            "5️⃣ Use /list to see all your saved media\n"
+            "   OR send a link to a Pinterest image\n"
+            "2️⃣ I'll download and send you the video or image\n"
+            "3️⃣ For videos: Use the '🎵 Download Audio' button to extract audio\n"
+            "4️⃣ Use the '💾 Save' button to save any media with a custom name\n"
+            "5️⃣ Use /list to see all your saved media (🎬 videos, 🎵 audio, 🖼️ images)\n"
             "6️⃣ Use /my [name] to retrieve your saved media\n\n"
             "Examples:\n"
-            "• Send: https://www.tiktok.com/@username/video/1234567890\n"
-            "• To retrieve: /my favorite_song"
+            "• Video: https://www.tiktok.com/@username/video/1234567890\n"
+            "• Pinterest Video: https://pin.it/abcdefghijk\n"
+            "• Image: https://pinterest.com/pin/123456789012345678\n"
+            "• To retrieve: /my my_favorite_image"
         )
         bot.reply_to(message, help_message)
     
@@ -88,7 +92,12 @@ def create_bot(token):
         
         response = "📋 Your saved media:\n\n"
         for i, (name, media_type) in enumerate(media_list, 1):
-            icon = "🎵" if media_type == "audio" else "🎬"
+            if media_type == "audio":
+                icon = "🎵"
+            elif media_type == "image":
+                icon = "🖼️"
+            else:
+                icon = "🎬"
             response += f"{i}. {icon} {name}\n"
         
         response += "\nTo retrieve a file, use /my [name]"
@@ -125,6 +134,9 @@ def create_bot(token):
         elif media_type == "audio":
             with open(file_path, 'rb') as audio_file:
                 bot.send_audio(message.chat.id, audio_file, title=media_name)
+        elif media_type == "image":
+            with open(file_path, 'rb') as image_file:
+                bot.send_photo(message.chat.id, image_file, caption=f"Your saved image: {media_name}")
     
     @bot.message_handler(func=lambda message: is_valid_url(message.text))
     def handle_url_message(message):
@@ -135,49 +147,94 @@ def create_bot(token):
         # Let the user know we're working on it
         status_message = bot.send_message(message.chat.id, "🔄 Processing your request. This may take a moment...")
         
+        # Determine the media type (video or image)
+        media_type, platform = get_url_type(url)
+        logger.info(f"Detected URL type: {media_type} from {platform}")
+        
         # Use a thread to handle the download process
         def download_thread():
             try:
-                # Download the video (wrap the async function)
+                # Initialize variables
+                media_path = None
+                
+                # Determine which download function to use based on the media type
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                video_path = loop.run_until_complete(download_video(url))
                 
-                if not video_path or not os.path.exists(video_path):
-                    bot.edit_message_text("❌ Failed to download the video. Please check the URL and try again.",
-                                         message.chat.id, status_message.message_id)
+                if platform == 'pinterest':
+                    if media_type == 'image':
+                        # Download Pinterest image
+                        media_path = loop.run_until_complete(download_pinterest_image(url))
+                        if media_path:
+                            logger.info(f"Downloaded Pinterest image to {media_path}")
+                    else:
+                        # Download Pinterest video
+                        media_path = loop.run_until_complete(download_pinterest_video(url))
+                        if media_path:
+                            logger.info(f"Downloaded Pinterest video to {media_path}")
+                else:
+                    # Default to video download for all other platforms
+                    media_path = loop.run_until_complete(download_video(url))
+                
+                if not media_path or not os.path.exists(media_path):
+                    error_msg = "❌ Failed to download the media. Please check the URL and try again."
+                    bot.edit_message_text(error_msg, message.chat.id, status_message.message_id)
                     return
                 
                 # Generate a unique ID for this media file
                 import hashlib
                 import time
-                media_id = hashlib.md5(f"{user_id}_{time.time()}_{video_path}".encode()).hexdigest()[:10]
+                media_id = hashlib.md5(f"{user_id}_{time.time()}_{media_path}".encode()).hexdigest()[:10]
                 
-                # Store the video path in the media cache
+                # Store the media path in the cache
                 if user_id not in media_cache:
                     media_cache[user_id] = {}
-                media_cache[user_id][media_id] = video_path
+                media_cache[user_id][media_id] = media_path
                 
-                # Create inline keyboard with buttons for audio extraction and saving
+                # Create inline keyboard markup
                 markup = types.InlineKeyboardMarkup()
-                extract_button = types.InlineKeyboardButton("🎵 Download Audio", 
-                                                         callback_data=f"extract_{media_id}")
-                save_button = types.InlineKeyboardButton("💾 Save", 
-                                                      callback_data=f"save_video_{media_id}")
-                markup.add(extract_button, save_button)
+                
+                if media_type == 'video':
+                    # For videos, add audio extraction button
+                    extract_button = types.InlineKeyboardButton("🎵 Download Audio", 
+                                                            callback_data=f"extract_{media_id}")
+                    save_button = types.InlineKeyboardButton("💾 Save", 
+                                                          callback_data=f"save_video_{media_id}")
+                    markup.add(extract_button, save_button)
+                else:
+                    # For images, just add save button
+                    save_button = types.InlineKeyboardButton("💾 Save", 
+                                                          callback_data=f"save_image_{media_id}")
+                    markup.add(save_button)
                 
                 # Delete the status message
                 bot.delete_message(message.chat.id, status_message.message_id)
                 
-                # Send the video with buttons
-                with open(video_path, 'rb') as video_file:
-                    bot.send_video(message.chat.id, video_file, caption="Here's your downloaded video!", 
-                                 reply_markup=markup)
+                # Send the media with appropriate method based on type
+                local_media_type = get_media_type(media_path)
                 
-                logger.info(f"Cached video with ID {media_id} for user {user_id}")
+                if local_media_type == 'video':
+                    # Send as video
+                    with open(media_path, 'rb') as media_file:
+                        bot.send_video(message.chat.id, media_file, caption="Here's your downloaded video!", 
+                                      reply_markup=markup)
+                
+                elif local_media_type == 'image':
+                    # Send as photo
+                    with open(media_path, 'rb') as media_file:
+                        bot.send_photo(message.chat.id, media_file, caption="Here's your downloaded image!", 
+                                      reply_markup=markup)
+                
+                else:
+                    # Default handling for other media types
+                    with open(media_path, 'rb') as media_file:
+                        bot.send_document(message.chat.id, media_file, caption="Here's your downloaded media!", 
+                                         reply_markup=markup)
+                
+                logger.info(f"Cached media ({local_media_type}) with ID {media_id} for user {user_id}")
                 
             except Exception as e:
-                logger.error(f"Error downloading video: {e}")
+                logger.error(f"Error downloading media: {e}")
                 bot.edit_message_text(f"❌ Error: {str(e)}", message.chat.id, status_message.message_id)
         
         thread = threading.Thread(target=download_thread)

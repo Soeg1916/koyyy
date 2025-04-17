@@ -38,10 +38,12 @@ def is_valid_url(text):
     # List of supported domains
     supported_domains = [
         'tiktok.com',
+        'vm.tiktok.com',
         'instagram.com',
         'youtube.com',
         'youtu.be',
-        'pinterest.com'
+        'pinterest.com',
+        'pin.it'
     ]
     
     # Check if the URL is from a supported domain
@@ -51,6 +53,45 @@ def is_valid_url(text):
     
     return False
 
+def get_url_type(url):
+    """
+    Determine the type of URL (video or image) and the platform.
+    
+    Args:
+        url (str): URL to check
+        
+    Returns:
+        tuple: (type, platform) where type is 'video' or 'image' and platform is the social media platform
+    """
+    parsed_url = urllib.parse.urlparse(url)
+    domain = parsed_url.netloc.lower()
+    path = parsed_url.path.lower()
+    
+    # Pinterest
+    if 'pinterest' in domain or 'pin.it' in domain:
+        from pinterest_extractor import is_pinterest_video_url
+        if is_pinterest_video_url(url):
+            return ('video', 'pinterest')
+        # Otherwise assume it's an image
+        return ('image', 'pinterest')
+    
+    # Instagram
+    elif 'instagram' in domain:
+        if '/reel/' in path or '/reels/' in path:
+            return ('video', 'instagram')
+        return ('video', 'instagram')  # Default to video for Instagram (most use case)
+    
+    # TikTok is always video
+    elif 'tiktok' in domain:
+        return ('video', 'tiktok')
+    
+    # YouTube is always video
+    elif 'youtube' in domain or 'youtu.be' in domain:
+        return ('video', 'youtube')
+    
+    # Default to video for any other supported platform
+    return ('video', 'unknown')
+
 def get_media_type(file_path):
     """
     Determine the media type based on file extension.
@@ -59,7 +100,7 @@ def get_media_type(file_path):
         file_path (str): Path to the media file
         
     Returns:
-        str: 'video' or 'audio' based on the file extension
+        str: 'video', 'audio', or 'image' based on the file extension
     """
     if not file_path:
         return None
@@ -68,13 +109,19 @@ def get_media_type(file_path):
     
     video_extensions = ['.mp4', '.avi', '.mov', '.flv', '.wmv', '.mkv', '.webm']
     audio_extensions = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac']
+    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
     
     if ext in video_extensions:
         return 'video'
     elif ext in audio_extensions:
         return 'audio'
+    elif ext in image_extensions:
+        return 'image'
     else:
-        # Default to video for unknown extensions
+        # Try to guess based on the file path
+        if 'image' in file_path.lower() or 'photo' in file_path.lower() or 'pinterest' in file_path.lower():
+            return 'image'
+        # Default to video for truly unknown extensions
         return 'video'
 
 def sanitize_filename(filename):
