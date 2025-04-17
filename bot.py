@@ -76,9 +76,6 @@ def create_bot(token):
             "6️⃣ Use /my [name] to retrieve your saved media\n"
             "7️⃣ Use /delete [name] to delete your saved media\n\n"
             "Examples:\n"
-            "• Video: https://www.tiktok.com/@username/video/1234567890\n"
-            "• Pinterest Video: https://pin.it/abcdefghijk\n"
-            "• Image: https://pinterest.com/pin/123456789012345678\n"
             "• To retrieve: /my my_favorite_image\n"
             "• To delete: /delete my_favorite_image"
         )
