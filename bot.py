@@ -73,12 +73,14 @@ def create_bot(token):
             "3️⃣ For videos: Use the '🎵 Download Audio' button to extract audio\n"
             "4️⃣ Use the '💾 Save' button to save any media with a custom name\n"
             "5️⃣ Use /list to see all your saved media (🎬 videos, 🎵 audio, 🖼️ images)\n"
-            "6️⃣ Use /my [name] to retrieve your saved media\n\n"
+            "6️⃣ Use /my [name] to retrieve your saved media\n"
+            "7️⃣ Use /delete [name] to delete your saved media\n\n"
             "Examples:\n"
             "• Video: https://www.tiktok.com/@username/video/1234567890\n"
             "• Pinterest Video: https://pin.it/abcdefghijk\n"
             "• Image: https://pinterest.com/pin/123456789012345678\n"
-            "• To retrieve: /my my_favorite_image"
+            "• To retrieve: /my my_favorite_image\n"
+            "• To delete: /delete my_favorite_image"
         )
         bot.reply_to(message, help_message)
     
@@ -103,6 +105,7 @@ def create_bot(token):
             response += f"{i}. {icon} {name}\n"
         
         response += "\nTo retrieve a file, use /my [name]"
+        response += "\nTo delete a file, use /delete [name]"
         bot.reply_to(message, response)
     
     @bot.message_handler(commands=['my'])

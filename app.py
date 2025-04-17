@@ -13,5 +13,7 @@ def index():
     """Home page - provides information about the Telegram bot."""
     return render_template('index.html')
 
+# This file is meant to be imported by main.py when run through the gunicorn server
+# If run directly, start the development server
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
