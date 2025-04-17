@@ -239,8 +239,18 @@ def create_bot(token):
                                       (" and audio" if audio_path else "") + "! Sending now...", 
                                       message.chat.id, status_message.message_id)
                     
-                    # Send each image separately
-                    for i, img_path in enumerate(image_paths):
+                    # For slideshows with many images, just send a few
+                    max_images_to_send = 5  # Send at most 5 images to avoid hitting rate limits
+                    
+                    # Inform the user if we're limiting the number of images
+                    if len(image_paths) > max_images_to_send:
+                        bot.send_message(message.chat.id, 
+                                       f"⚠️ This slideshow has {len(image_paths)} images. To avoid Telegram rate limits, " + 
+                                       f"I'll only send the first {max_images_to_send} images.")
+                    
+                    # Send a limited number of images with delay between each
+                    images_to_send = image_paths[:max_images_to_send]
+                    for i, img_path in enumerate(images_to_send):
                         try:
                             # Create a unique ID for this image
                             import hashlib
@@ -258,13 +268,42 @@ def create_bot(token):
                                                              callback_data=f"save_image_{img_id}")
                             markup.add(save_button)
                             
-                            # Send the image
+                            # Send the image with rate limit protection
                             with open(img_path, 'rb') as img_file:
-                                caption = f"Slideshow image {i+1}/{len(image_paths)}"
-                                bot.send_photo(message.chat.id, img_file, caption=caption, reply_markup=markup)
+                                caption = f"Slideshow image {i+1}/{len(images_to_send)} (of total {len(image_paths)})"
+                                try:
+                                    bot.send_photo(message.chat.id, img_file, caption=caption, reply_markup=markup)
+                                    # Sleep to avoid hitting rate limits
+                                    time.sleep(1)
+                                except telebot.apihelper.ApiTelegramException as api_error:
+                                    if "Too Many Requests" in str(api_error):
+                                        # Extract retry-after time
+                                        retry_seconds = 5  # Default
+                                        if "retry after" in str(api_error):
+                                            try:
+                                                retry_part = str(api_error).split("retry after")[1].strip()
+                                                retry_seconds = int(retry_part.split()[0])
+                                            except:
+                                                pass
+                                        
+                                        logger.info(f"Hit rate limit, waiting for {retry_seconds} seconds")
+                                        bot.send_message(message.chat.id, 
+                                                      f"⚠️ Hit Telegram rate limit. Waiting {retry_seconds} seconds before continuing...")
+                                        time.sleep(retry_seconds + 1)
+                                        
+                                        # Try again after waiting
+                                        with open(img_path, 'rb') as img_file_retry:
+                                            bot.send_photo(message.chat.id, img_file_retry, caption=caption, reply_markup=markup)
+                                    else:
+                                        raise  # Re-raise if it's not a rate limit error
                         except Exception as e:
                             logger.error(f"Error sending image {i+1}: {e}")
-                            bot.send_message(message.chat.id, f"⚠️ Error sending image {i+1}")
+                            try:
+                                bot.send_message(message.chat.id, f"⚠️ Error sending image {i+1}. Will continue with next one...")
+                                time.sleep(1)  # Add delay to avoid rate limits
+                            except:
+                                logger.error("Failed to send error message")
+                                time.sleep(3)  # Longer delay if we can't even send error messages
                     
                     # Send audio if available
                     if audio_path and os.path.exists(audio_path):
