@@ -345,11 +345,11 @@ async def download_tiktok_slideshow(url):
     logger.info(f"Downloading TikTok slideshow from: {url}")
     
     try:
-        from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
         import requests
         import shutil
         from PIL import Image
         import time
+        import re
         
         # Create a unique directory for this slideshow
         timestamp = int(time.time())
@@ -364,14 +364,43 @@ async def download_tiktok_slideshow(url):
             'Referer': 'https://www.tiktok.com/',
             'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
             'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"'
+            'sec-ch-ua-platform': '"Windows"',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
         }
+        
+        # Normalize the URL if it's shortened
+        try:
+            if ('vm.tiktok.com' in url.lower() or 
+                'vt.tiktok.com' in url.lower()):
+                response = requests.head(url, headers=headers, allow_redirects=True)
+                if response.status_code == 200:
+                    url = response.url
+                    logger.info(f"Resolved shortened URL to: {url}")
+        except Exception as e:
+            logger.warning(f"Error following TikTok redirect: {e}")
         
         # Fetch the TikTok page to extract image URLs and audio URL
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             logger.error(f"Failed to fetch TikTok page: {response.status_code}")
             return None
+            
+        # Add debug output to analyze page content
+        logger.info(f"Got TikTok page response, length: {len(response.text)} bytes")
+        
+        # Check for keywords in page content to verify it's a slideshow
+        slideshow_indicators = ['/photo/', 'photo-mode', 'photoMode', 'carousel', 'slide', 'gallery']
+        found_indicator = None
+        for indicator in slideshow_indicators:
+            if indicator in response.text:
+                found_indicator = indicator
+                logger.info(f"Confirmed TikTok slideshow by finding '{indicator}' in page content")
+                break
+                
+        if not found_indicator:
+            logger.warning("No slideshow indicators found in page content - might not be a slideshow")
+            # Continue anyway as we might still find images
             
         # Parse the HTML to extract image URLs and audio URL
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -611,7 +640,19 @@ async def download_video(url):
         parsed_url = urllib.parse.urlparse(url)
         domain = parsed_url.netloc.lower()
         
+        # For TikTok URLs, perform more robust detection of slideshows
         if 'tiktok' in domain:
+            # Special handling for obvious slideshow URLs first - don't even attempt video download
+            if '/photo/' in parsed_url.path.lower() or 'aweme_type=150' in url:
+                logger.info("URL contains explicit slideshow indicators, using slideshow downloader directly")
+                slideshow_result = await download_tiktok_slideshow(url)
+                if slideshow_result:
+                    logger.info("Successfully downloaded TikTok slideshow")
+                    return {'type': 'slideshow', 'data': slideshow_result}
+                logger.error("Direct slideshow download failed")
+                return None
+                
+            # For less obvious cases, perform additional detection
             try:
                 is_slideshow = await is_tiktok_slideshow(url)
                 if is_slideshow:
