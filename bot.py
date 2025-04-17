@@ -183,7 +183,7 @@ def create_bot(token):
         def download_thread():
             try:
                 # Initialize variables
-                media_path = None
+                download_result = None
                 
                 # Determine which download function to use based on the media type
                 loop = asyncio.new_event_loop()
@@ -192,26 +192,110 @@ def create_bot(token):
                 if platform == 'pinterest':
                     if media_type == 'image':
                         # Download Pinterest image
-                        media_path = loop.run_until_complete(download_pinterest_image(url))
-                        if media_path:
-                            logger.info(f"Downloaded Pinterest image to {media_path}")
+                        download_result = loop.run_until_complete(download_pinterest_image(url))
+                        if download_result:
+                            logger.info(f"Downloaded Pinterest image to {download_result}")
                     else:
                         # Download Pinterest video
-                        media_path = loop.run_until_complete(download_pinterest_video(url))
-                        if media_path:
-                            logger.info(f"Downloaded Pinterest video to {media_path}")
+                        download_result = loop.run_until_complete(download_pinterest_video(url))
+                        if download_result:
+                            logger.info(f"Downloaded Pinterest video to {download_result}")
                 elif platform == 'tiktok' and media_type == 'slideshow':
-                    # For TikTok slideshows, use the regular video download function
-                    # Our enhanced download_video will detect it's a slideshow and handle appropriately
-                    media_path = loop.run_until_complete(download_video(url))
-                    if media_path:
-                        logger.info(f"Downloaded TikTok slideshow to {media_path}")
+                    # For TikTok slideshows, use the regular video download function with our new handling
+                    download_result = loop.run_until_complete(download_video(url))
+                    if download_result:
+                        if isinstance(download_result, dict) and download_result.get('type') == 'slideshow':
+                            logger.info(f"Downloaded TikTok slideshow as separate images and audio")
+                        else:
+                            logger.info(f"Downloaded TikTok slideshow to {download_result}")
                 else:
                     # Default to video download for all other platforms
-                    media_path = loop.run_until_complete(download_video(url))
+                    download_result = loop.run_until_complete(download_video(url))
                 
-                if not media_path or not os.path.exists(media_path):
+                if not download_result:
                     error_msg = "❌ Failed to download the media. Please check the URL and try again."
+                    bot.edit_message_text(error_msg, message.chat.id, status_message.message_id)
+                    return
+                    
+                # Check if we got a TikTok slideshow result (dictionary with images and audio)
+                if isinstance(download_result, dict) and download_result.get('type') == 'slideshow':
+                    # Handle TikTok slideshow specially by sending images and audio separately
+                    slideshow_data = download_result.get('data', {})
+                    image_paths = slideshow_data.get('images', [])
+                    audio_path = slideshow_data.get('audio')
+                    
+                    if not image_paths:
+                        bot.edit_message_text("❌ Failed to extract images from the slideshow.", 
+                                           message.chat.id, status_message.message_id)
+                        return
+                    
+                    # Inform the user we're sending slideshow content
+                    bot.edit_message_text(f"✅ Downloaded TikTok slideshow with {len(image_paths)} images" + 
+                                      (" and audio" if audio_path else "") + "! Sending now...", 
+                                      message.chat.id, status_message.message_id)
+                    
+                    # Send each image separately
+                    for i, img_path in enumerate(image_paths):
+                        try:
+                            # Create a unique ID for this image
+                            import hashlib
+                            import time
+                            img_id = hashlib.md5(f"{user_id}_{time.time()}_{img_path}_{i}".encode()).hexdigest()[:10]
+                            
+                            # Cache the image path
+                            if user_id not in media_cache:
+                                media_cache[user_id] = {}
+                            media_cache[user_id][img_id] = img_path
+                            
+                            # Create markup for saving the image
+                            markup = types.InlineKeyboardMarkup()
+                            save_button = types.InlineKeyboardButton("💾 Save Image", 
+                                                             callback_data=f"save_image_{img_id}")
+                            markup.add(save_button)
+                            
+                            # Send the image
+                            with open(img_path, 'rb') as img_file:
+                                caption = f"Slideshow image {i+1}/{len(image_paths)}"
+                                bot.send_photo(message.chat.id, img_file, caption=caption, reply_markup=markup)
+                        except Exception as e:
+                            logger.error(f"Error sending image {i+1}: {e}")
+                            bot.send_message(message.chat.id, f"⚠️ Error sending image {i+1}")
+                    
+                    # Send audio if available
+                    if audio_path and os.path.exists(audio_path):
+                        try:
+                            # Create a unique ID for the audio
+                            audio_id = hashlib.md5(f"{user_id}_{time.time()}_audio".encode()).hexdigest()[:10]
+                            
+                            # Cache the audio path
+                            if user_id not in media_cache:
+                                media_cache[user_id] = {}
+                            media_cache[user_id][audio_id] = audio_path
+                            
+                            # Create markup for saving the audio
+                            markup = types.InlineKeyboardMarkup()
+                            save_button = types.InlineKeyboardButton("💾 Save Audio", 
+                                                             callback_data=f"save_audio_{audio_id}")
+                            markup.add(save_button)
+                            
+                            # Send the audio
+                            with open(audio_path, 'rb') as audio_file:
+                                bot.send_audio(message.chat.id, audio_file, 
+                                            caption="Slideshow audio track", 
+                                            title="TikTok Slideshow Audio",
+                                            reply_markup=markup)
+                        except Exception as e:
+                            logger.error(f"Error sending audio: {e}")
+                            bot.send_message(message.chat.id, "⚠️ Error sending audio track")
+                    
+                    logger.info(f"Sent TikTok slideshow with {len(image_paths)} images and audio: {audio_path is not None}")
+                    return
+                    
+                # For regular media (not slideshow), use the standard approach
+                media_path = download_result
+                
+                if not os.path.exists(media_path):
+                    error_msg = "❌ Failed to access the downloaded media file."
                     bot.edit_message_text(error_msg, message.chat.id, status_message.message_id)
                     return
                 
