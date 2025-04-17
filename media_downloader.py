@@ -510,17 +510,108 @@ async def download_tiktok_slideshow(url):
         # If we still don't have images, try a more aggressive approach
         if not image_urls:
             logger.info("No images found with initial methods, trying more aggressive approach")
-            # Look for any URLs in the HTML that might be images
-            try:
-                url_pattern = r'(https?://[^\s\'"\)]+\.(jpg|jpeg|png|webp))'
-                matches = re.findall(url_pattern, response.text)
-                for match in matches:
-                    full_url = match[0]  # Get the full URL from the match
-                    if full_url not in image_urls:
-                        image_urls.append(full_url)
-                        logger.info(f"Found image URL with regex: {full_url}")
-            except Exception as e:
-                logger.warning(f"Error extracting image URLs with regex: {e}")
+            
+            # Special TikTok image patterns - they don't always use clear .jpg extensions in URLs
+            tiktok_image_patterns = [
+                r'(https?://[^"\'>\s]+\.image[^"\'>\s]*)',
+                r'(https?://[^"\'>\s]+\.tiktokcdn[^"\'>\s]*)',
+                r'(https://[^"\'>\s]+\.tiktok\.com/[^"\'>\s]+)',
+                r'property="og:image"\s+content="([^"]+)"',
+                r'<img[^>]+src="([^"]+)"',
+                r'"image":"([^"]+)"',
+                r'"images":\s*\[\s*"([^"]+)"',
+                r'"imageList":\s*\[\s*"([^"]+)"',
+                r'"imagePostInfo":[^{]*"url":"([^"]+)"',
+                r'"originCover":"([^"]+)"',
+                r'"thumbnailUrl":"([^"]+)"',
+                r'"imageUrl":"([^"]+)"',
+                r'"animatedCoverUrl":"([^"]+)"'
+            ]
+            
+            for pattern in tiktok_image_patterns:
+                try:
+                    matches = re.findall(pattern, response.text)
+                    for match in matches:
+                        image_url = match
+                        if isinstance(match, tuple) and len(match) > 0:
+                            image_url = match[0]
+                        
+                        # Clean up the URL - TikTok often has escaped URLs
+                        image_url = image_url.replace('\\u002F', '/').replace('\\/', '/').replace('\\', '')
+                        
+                        # Add https:// if it's missing
+                        if image_url.startswith('//'):
+                            image_url = 'https:' + image_url
+                            
+                        # Only add if it looks like a valid image URL
+                        if image_url.startswith('http') and (
+                                'image' in image_url.lower() or 
+                                'tiktok' in image_url.lower() or 
+                                any(ext in image_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp'])):
+                            if image_url not in image_urls:
+                                image_urls.append(image_url)
+                                logger.info(f"Found image URL with pattern {pattern}: {image_url}")
+                            
+                    # If we've found at least 2 images, that's probably good enough
+                    if len(image_urls) >= 2:
+                        logger.info(f"Found {len(image_urls)} image URLs, proceeding with download")
+                        break
+                except Exception as e:
+                    logger.warning(f"Error extracting image URLs with pattern {pattern}: {e}")
+            
+            # If still no images, try the generic approach
+            if not image_urls:
+                try:
+                    url_pattern = r'(https?://[^\s\'"\)]+\.(jpg|jpeg|png|webp))'
+                    matches = re.findall(url_pattern, response.text)
+                    for match in matches:
+                        full_url = match[0]  # Get the full URL from the match
+                        if full_url not in image_urls:
+                            image_urls.append(full_url)
+                            logger.info(f"Found image URL with generic regex: {full_url}")
+                except Exception as e:
+                    logger.warning(f"Error extracting image URLs with generic regex: {e}")
+                    
+            # Fallback extraction method - use a direct approach when nothing else works
+            if not image_urls:
+                logger.info("No images found with regex methods, trying direct API extraction")
+                try:
+                    # Extract the item_id from the URL which is needed for the API
+                    item_id = None
+                    item_id_pattern = r'photo/(\d+)'
+                    item_id_match = re.search(item_id_pattern, url)
+                    if item_id_match:
+                        item_id = item_id_match.group(1)
+                    
+                    # If we have an item_id, we can try the direct TikTok API approach
+                    if item_id:
+                        logger.info(f"Found item_id: {item_id}, trying direct API")
+                        # This is a fallback approach using TikTok's public API
+                        api_url = f"https://api.tiktok.com/aweme/v1/multi/aweme/detail/?aweme_ids=%5B{item_id}%5D"
+                        api_headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Referer': 'https://www.tiktok.com/',
+                            'Accept': 'application/json'
+                        }
+                        api_response = requests.get(api_url, headers=api_headers)
+                        if api_response.status_code == 200:
+                            try:
+                                data = api_response.json()
+                                # Recursively search for image URLs in the API response
+                                if 'aweme_details' in data and data['aweme_details']:
+                                    for detail in data['aweme_details']:
+                                        if 'image_post_info' in detail and detail['image_post_info']:
+                                            images_data = detail['image_post_info'].get('images', [])
+                                            for img in images_data:
+                                                if 'display_image' in img and img['display_image']:
+                                                    image_url = img['display_image'].get('url_list', [])[0]
+                                                    if image_url and image_url not in image_urls:
+                                                        image_urls.append(image_url)
+                                                        logger.info(f"Found image URL from API: {image_url}")
+                            except Exception as e:
+                                logger.warning(f"Error parsing TikTok API response: {e}")
+                except Exception as e:
+                    logger.warning(f"Error with direct API extraction: {e}")
         
         # Extract audio URL - try multiple methods
         audio_url = None
