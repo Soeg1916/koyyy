@@ -12,6 +12,10 @@
   ],
   "routes": [
     {
+      "src": "/api/debug",
+      "dest": "/api/index.py.debug"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/index.py"
     },
@@ -19,5 +23,15 @@
       "src": "/(.*)",
       "dest": "/app.py"
     }
-  ]
+  ],
+  "functions": {
+    "api/index.py": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "api/index.py.debug": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  }
 }

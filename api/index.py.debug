@@ -1,0 +1,76 @@
+"""
+Simplified Vercel serverless function for debugging.
+"""
+import os
+import sys
+import traceback
+from flask import Flask, request, jsonify
+
+# Configure logging
+import logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Initialize Flask app
+app = Flask(__name__)
+
+@app.route('/', methods=['GET'])
+def home():
+    """Health check endpoint."""
+    # Log Python version and environment details
+    python_version = sys.version
+    env_vars = [key for key in os.environ.keys()]
+    
+    return jsonify({
+        "status": "alive", 
+        "service": "Telegram Bot Webhook Debug Mode",
+        "python_version": python_version,
+        "environment_variables_available": env_vars[:10]  # Only show first 10 for security
+    })
+
+@app.route('/test-import', methods=['GET'])
+def test_import():
+    """Test importing modules to check for issues."""
+    errors = []
+    modules = ["flask", "telebot", "requests", "yt_dlp", "PIL", "trafilatura"]
+    
+    for module in modules:
+        try:
+            __import__(module)
+            logger.info(f"Successfully imported {module}")
+        except Exception as e:
+            error_message = str(e)
+            errors.append({"module": module, "error": error_message})
+            logger.error(f"Error importing {module}: {error_message}")
+    
+    return jsonify({
+        "status": "completed",
+        "import_errors": errors,
+        "modules_tested": modules
+    })
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Simple webhook endpoint for testing."""
+    try:
+        data = request.get_json() if request.is_json else request.form.to_dict()
+        return jsonify({"status": "received", "data_summary": str(data)[:100]})
+    except Exception as e:
+        error_traceback = traceback.format_exc()
+        return jsonify({"error": str(e), "traceback": error_traceback}), 500
+
+# For Vercel serverless functions
+def handler(event, context):
+    """Handler for Vercel serverless functions."""
+    try:
+        return app(event, context)
+    except Exception as e:
+        logger.error(f"Handler error: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {
+            "statusCode": 500,
+            "body": f"Server error: {str(e)}"
+        }

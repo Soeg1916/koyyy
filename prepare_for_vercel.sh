@@ -40,6 +40,14 @@ else
     echo "   ! Warning: api/index.py.vercel not found, skipping"
 fi
 
+# Copy the debug version for troubleshooting
+if [ -f "api/index.py.debug" ]; then
+    cp api/index.py.debug api/index.py.debug
+    echo "   ✓ Debug endpoint prepared"
+else
+    echo "   ! Warning: api/index.py.debug not found, skipping"
+fi
+
 # Ensure we have the requirements-vercel.txt file
 if [ -f "requirements-vercel.txt" ]; then
     echo "   ✓ requirements-vercel.txt found"
