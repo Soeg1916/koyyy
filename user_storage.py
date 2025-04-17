@@ -20,12 +20,26 @@ STORAGE_DATA_FILE = os.path.join(STORAGE_BASE_DIR, "user_data.json")
 
 def initialize_user_storage():
     """Initialize the storage directories and data file."""
+    # Create base storage directory if it doesn't exist
     os.makedirs(STORAGE_BASE_DIR, exist_ok=True)
+    
+    # Secure the base directory
+    try:
+        os.chmod(STORAGE_BASE_DIR, 0o700)  # Read, write, execute only for owner
+    except Exception as e:
+        logger.warning(f"Could not set base directory permissions: {str(e)}")
     
     # Create the data file if it doesn't exist
     if not os.path.exists(STORAGE_DATA_FILE):
         with open(STORAGE_DATA_FILE, 'w') as f:
             json.dump({}, f)
+        
+        # Secure the data file
+        try:
+            os.chmod(STORAGE_DATA_FILE, 0o600)  # Read and write only for owner
+        except Exception as e:
+            logger.warning(f"Could not set data file permissions: {str(e)}")
+            
         logger.info("Initialized user storage data file")
 
 def _get_user_data():
@@ -45,9 +59,21 @@ def _save_user_data(data):
         json.dump(data, f, indent=2)
 
 def _get_user_dir(user_id):
-    """Get the storage directory for a specific user."""
-    user_dir = os.path.join(STORAGE_BASE_DIR, str(user_id))
+    """
+    Get the storage directory for a specific user.
+    Each user has their own private directory based on their Telegram ID.
+    """
+    # Ensure user_id is converted to string and sanitized to prevent directory traversal
+    safe_user_id = str(user_id).replace('..', '').replace('/', '').replace('\\', '')
+    user_dir = os.path.join(STORAGE_BASE_DIR, safe_user_id)
     os.makedirs(user_dir, exist_ok=True)
+    
+    # Set directory permissions to be accessible only by the owner (700)
+    try:
+        os.chmod(user_dir, 0o700)  # Read, write, execute only for owner
+    except Exception as e:
+        logger.warning(f"Could not set directory permissions: {str(e)}")
+        
     return user_dir
 
 def save_media(user_id, name, source_path, media_type):
@@ -83,6 +109,12 @@ def save_media(user_id, name, source_path, media_type):
         
         # Copy the file
         shutil.copy2(source_path, dest_path)
+        
+        # Set file permissions to be accessible only by owner
+        try:
+            os.chmod(dest_path, 0o600)  # Read and write only for owner
+        except Exception as e:
+            logger.warning(f"Could not set file permissions: {str(e)}")
         
         # Update user data
         user_data = _get_user_data()

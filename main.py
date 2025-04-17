@@ -8,6 +8,7 @@ import logging
 import threading
 from dotenv import load_dotenv
 from bot import create_bot, start_bot
+from user_storage import initialize_user_storage
 
 # Configure logging
 logging.basicConfig(
@@ -50,6 +51,11 @@ def run_bot():
         return
     
     try:
+        # Initialize user storage
+        with open('/tmp/bot_debug.log', 'a') as f:
+            f.write("Initializing user storage...\n")
+        initialize_user_storage()
+        
         # Create and start the bot
         with open('/tmp/bot_debug.log', 'a') as f:
             f.write("Creating bot...\n")
