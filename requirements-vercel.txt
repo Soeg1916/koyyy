@@ -2,7 +2,9 @@ beautifulsoup4==4.12.2
 email-validator==2.1.1
 flask==3.0.0
 gunicorn==23.0.0
+pillow==10.2.0
 pytelegrambotapi==4.15.2
 python-dotenv==1.0.1
 requests==2.31.0
 trafilatura==1.7.0
+yt-dlp==2025.3.31
