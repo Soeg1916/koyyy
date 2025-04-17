@@ -659,6 +659,7 @@ async def download_tiktok_slideshow(url):
             
         # Download images
         image_paths = []
+        valid_image_count = 0
         for i, img_url in enumerate(image_urls):
             try:
                 img_path = os.path.join(slideshow_dir, f"image_{i}.jpg")
@@ -667,12 +668,58 @@ async def download_tiktok_slideshow(url):
                     with open(img_path, 'wb') as f:
                         img_response.raw.decode_content = True
                         shutil.copyfileobj(img_response.raw, f)
-                    image_paths.append(img_path)
-                    logger.info(f"Downloaded image {i+1}/{len(image_urls)}")
+                    
+                    # Verify the image is valid and not empty
+                    if os.path.exists(img_path) and os.path.getsize(img_path) > 1000:
+                        try:
+                            # Try to validate image by opening it with PIL
+                            from PIL import Image
+                            try:
+                                img = Image.open(img_path)
+                                # Check dimensions
+                                width, height = img.size
+                                if width < 50 or height < 50:
+                                    logger.warning(f"Image {i+1} too small: {width}x{height}, skipping")
+                                    os.remove(img_path)
+                                    continue
+                                    
+                                # Close the image
+                                img.close()
+                                
+                                # If we get here, the image is valid
+                                image_paths.append(img_path)
+                                valid_image_count += 1
+                                logger.info(f"Downloaded image {i+1}/{len(image_urls)} ({width}x{height}px)")
+                            except Exception as img_err:
+                                logger.warning(f"Invalid image file for {i+1}: {img_err}")
+                                # Delete the invalid image file
+                                if os.path.exists(img_path):
+                                    os.remove(img_path)
+                        except ImportError:
+                            # If PIL is not installed, fall back to basic size check
+                            if os.path.getsize(img_path) > 5000:  # Assume it's valid if > 5KB
+                                image_paths.append(img_path)
+                                valid_image_count += 1
+                                logger.info(f"Downloaded image {i+1}/{len(image_urls)} (basic validation)")
+                            else:
+                                logger.warning(f"Image file too small, likely invalid: {img_path}")
+                                if os.path.exists(img_path):
+                                    os.remove(img_path)
+                    else:
+                        logger.warning(f"Downloaded empty or too small image file for {i+1}")
+                        # Delete the file if it exists but is invalid
+                        if os.path.exists(img_path):
+                            os.remove(img_path)
                 else:
                     logger.warning(f"Failed to download image {i+1}: {img_response.status_code}")
             except Exception as e:
                 logger.warning(f"Error downloading image {i+1}: {e}")
+                # Clean up any partially downloaded file
+                if os.path.exists(img_path):
+                    os.remove(img_path)
+                    
+        # Log the actual number of valid images
+        logger.info(f"Successfully validated {valid_image_count} of {len(image_urls)} images")
         
         # Download audio if available
         audio_path = None
