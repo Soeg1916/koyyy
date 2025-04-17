@@ -81,8 +81,20 @@ def get_url_type(url):
             return ('video', 'instagram')
         return ('video', 'instagram')  # Default to video for Instagram (most use case)
     
-    # TikTok is always video
+    # TikTok can be video or slideshow (treated as video)
     elif 'tiktok' in domain:
+        # Check for TikTok photo/slideshow indicators
+        if '/photo/' in path:
+            return ('slideshow', 'tiktok')
+        
+        # Check query parameters
+        query = urllib.parse.parse_qs(parsed_url.query)
+        if 'aweme_type' in query and query['aweme_type'][0] == '150':
+            return ('slideshow', 'tiktok')
+        if 'pic_cnt' in query and int(query['pic_cnt'][0]) > 0:
+            return ('slideshow', 'tiktok')
+            
+        # Default to regular video
         return ('video', 'tiktok')
     
     # YouTube is always video

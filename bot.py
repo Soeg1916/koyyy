@@ -200,6 +200,12 @@ def create_bot(token):
                         media_path = loop.run_until_complete(download_pinterest_video(url))
                         if media_path:
                             logger.info(f"Downloaded Pinterest video to {media_path}")
+                elif platform == 'tiktok' and media_type == 'slideshow':
+                    # For TikTok slideshows, use the regular video download function
+                    # Our enhanced download_video will detect it's a slideshow and handle appropriately
+                    media_path = loop.run_until_complete(download_video(url))
+                    if media_path:
+                        logger.info(f"Downloaded TikTok slideshow to {media_path}")
                 else:
                     # Default to video download for all other platforms
                     media_path = loop.run_until_complete(download_video(url))
@@ -222,8 +228,8 @@ def create_bot(token):
                 # Create inline keyboard markup
                 markup = types.InlineKeyboardMarkup()
                 
-                if media_type == 'video':
-                    # For videos, add audio extraction button
+                if media_type == 'video' or media_type == 'slideshow':
+                    # For videos and slideshows, add audio extraction button
                     extract_button = types.InlineKeyboardButton("🎵 Download Audio", 
                                                             callback_data=f"extract_{media_id}")
                     save_button = types.InlineKeyboardButton("💾 Save", 
