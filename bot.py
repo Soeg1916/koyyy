@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 # Store temporary user data
 user_data_store = {}
 
+# Store recently downloaded media with user_id as key and a list of media paths as value
+# This is a cache of media files that users might want to extract audio from or save
+media_cache = {}
+
 # State constants for conversation flows
 WAITING_FOR_SAVE_NAME = 1
 user_states = {}
@@ -126,6 +130,7 @@ def create_bot(token):
     def handle_url_message(message):
         """Handler for messages containing URLs"""
         url = message.text
+        user_id = message.from_user.id
         
         # Let the user know we're working on it
         status_message = bot.send_message(message.chat.id, "🔄 Processing your request. This may take a moment...")
@@ -143,12 +148,22 @@ def create_bot(token):
                                          message.chat.id, status_message.message_id)
                     return
                 
+                # Generate a unique ID for this media file
+                import hashlib
+                import time
+                media_id = hashlib.md5(f"{user_id}_{time.time()}_{video_path}".encode()).hexdigest()[:10]
+                
+                # Store the video path in the media cache
+                if user_id not in media_cache:
+                    media_cache[user_id] = {}
+                media_cache[user_id][media_id] = video_path
+                
                 # Create inline keyboard with buttons for audio extraction and saving
                 markup = types.InlineKeyboardMarkup()
                 extract_button = types.InlineKeyboardButton("🎵 Download Audio", 
-                                                         callback_data=f"extract_audio_{video_path}")
+                                                         callback_data=f"extract_{media_id}")
                 save_button = types.InlineKeyboardButton("💾 Save", 
-                                                      callback_data=f"save_video_{video_path}")
+                                                      callback_data=f"save_video_{media_id}")
                 markup.add(extract_button, save_button)
                 
                 # Delete the status message
@@ -159,6 +174,8 @@ def create_bot(token):
                     bot.send_video(message.chat.id, video_file, caption="Here's your downloaded video!", 
                                  reply_markup=markup)
                 
+                logger.info(f"Cached video with ID {media_id} for user {user_id}")
+                
             except Exception as e:
                 logger.error(f"Error downloading video: {e}")
                 bot.edit_message_text(f"❌ Error: {str(e)}", message.chat.id, status_message.message_id)
@@ -167,18 +184,33 @@ def create_bot(token):
         thread.daemon = True
         thread.start()
     
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('extract_audio_'))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('extract_'))
     def extract_audio_callback(call):
         """Handle callback for extracting audio from a video"""
         bot.answer_callback_query(call.id)
         
-        # Get the video path from the callback data
-        _, video_path = call.data.split("_", 1)
+        user_id = call.from_user.id
         
-        if not os.path.exists(video_path):
-            bot.edit_message_caption(caption="⚠️ Video file no longer available.", 
+        # Get the media ID from the callback data
+        media_id = call.data.split("_")[1]
+        
+        # Check if the user has this media in cache
+        if user_id not in media_cache or media_id not in media_cache[user_id]:
+            bot.edit_message_caption(caption="⚠️ Video file no longer available. Please download it again.", 
                                    chat_id=call.message.chat.id, 
                                    message_id=call.message.message_id)
+            return
+        
+        # Get the video path from the cache
+        video_path = media_cache[user_id][media_id]
+        
+        # Verify the file still exists
+        if not os.path.exists(video_path):
+            bot.edit_message_caption(caption="⚠️ Video file no longer available. Please download it again.", 
+                                   chat_id=call.message.chat.id, 
+                                   message_id=call.message.message_id)
+            # Remove from cache since file is gone
+            del media_cache[user_id][media_id]
             return
         
         # Inform the user
@@ -199,10 +231,18 @@ def create_bot(token):
                                            message_id=call.message.message_id)
                     return
                 
+                # Generate a unique ID for the audio
+                import hashlib
+                import time
+                audio_id = hashlib.md5(f"{user_id}_{time.time()}_{audio_path}".encode()).hexdigest()[:10]
+                
+                # Add audio to media cache
+                media_cache[user_id][audio_id] = audio_path
+                
                 # Create inline keyboard with save button
                 markup = types.InlineKeyboardMarkup()
                 save_button = types.InlineKeyboardButton("💾 Save", 
-                                                      callback_data=f"save_audio_{audio_path}")
+                                                      callback_data=f"save_audio_{audio_id}")
                 markup.add(save_button)
                 
                 # Send the audio file
@@ -214,15 +254,17 @@ def create_bot(token):
                 # Restore the original video caption with its buttons
                 markup = types.InlineKeyboardMarkup()
                 extract_button = types.InlineKeyboardButton("🎵 Download Audio", 
-                                                         callback_data=f"extract_audio_{video_path}")
+                                                         callback_data=f"extract_{media_id}")
                 save_button = types.InlineKeyboardButton("💾 Save", 
-                                                      callback_data=f"save_video_{video_path}")
+                                                      callback_data=f"save_video_{media_id}")
                 markup.add(extract_button, save_button)
                 
                 bot.edit_message_caption(caption="Here's your downloaded video!",
                                        chat_id=call.message.chat.id,
                                        message_id=call.message.message_id,
                                        reply_markup=markup)
+                
+                logger.info(f"Extracted audio {audio_id} from video {media_id} for user {user_id}")
                 
             except Exception as e:
                 logger.error(f"Error in extraction thread: {e}")
@@ -245,17 +287,29 @@ def create_bot(token):
             bot.send_message(call.message.chat.id, "❌ Invalid data format.")
             return
         
-        _, media_type, media_path = data_parts
+        _, media_type, media_id = data_parts
+        user_id = call.from_user.id
         
+        # Check if the user has this media in cache
+        if user_id not in media_cache or media_id not in media_cache[user_id]:
+            bot.send_message(call.message.chat.id, "⚠️ Media file no longer available. Please download it again.")
+            return
+        
+        # Get the actual file path from the cache
+        media_path = media_cache[user_id][media_id]
+        
+        # Verify the file still exists
         if not os.path.exists(media_path):
-            bot.send_message(call.message.chat.id, "⚠️ Media file no longer available.")
+            bot.send_message(call.message.chat.id, "⚠️ Media file no longer available. Please download it again.")
+            # Remove from cache since file is gone
+            del media_cache[user_id][media_id]
             return
         
         # Store data for the conversation
-        user_id = call.from_user.id
         user_data_store[user_id] = {
             "media_type": media_type,
             "media_path": media_path,
+            "media_id": media_id,
             "chat_id": call.message.chat.id
         }
         
@@ -323,6 +377,11 @@ def create_bot(token):
             bot.reply_to(message, f"❌ Failed to save the {media_type}. Please try again.")
         
         # Clean up
+        if "media_id" in user_data and user_id in media_cache and user_data["media_id"] in media_cache[user_id]:
+            # After successful save, we can remove from temporary cache
+            logger.info(f"Removing media {user_data['media_id']} from cache after saving as '{media_name}'")
+            del media_cache[user_id][user_data["media_id"]]
+            
         del user_data_store[user_id]
         del user_states[user_id]
     
