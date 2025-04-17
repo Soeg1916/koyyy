@@ -1,0 +1,20 @@
+name: telegram-media-bot
+service:
+  app:
+    type: web
+    buildCommand: pip install -r pyproject.toml
+    startCommand: python main.py
+    env:
+      - key: TELEGRAM_BOT_TOKEN
+        value: "from_secret"
+    ports:
+      - port: 5000
+        protocol: http
+        ingress: true
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+    # Koyeb uses around 512MB by default, add more if needed
+    resources:
+      cpu: 0.25
+      memory: 1Gi
