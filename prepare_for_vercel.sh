@@ -24,6 +24,22 @@ else
     echo "   ! Warning: app.py.vercel not found, skipping"
 fi
 
+# Copy the Vercel-compatible user_storage.py
+if [ -f "user_storage_vercel.py" ]; then
+    cp user_storage_vercel.py user_storage.py
+    echo "   ✓ Copied user_storage_vercel.py to user_storage.py"
+else
+    echo "   ! Warning: user_storage_vercel.py not found, skipping"
+fi
+
+# Copy the Vercel-compatible api/index.py
+if [ -f "api/index.py.vercel" ]; then
+    cp api/index.py.vercel api/index.py
+    echo "   ✓ Copied api/index.py.vercel to api/index.py"
+else
+    echo "   ! Warning: api/index.py.vercel not found, skipping"
+fi
+
 # Ensure we have the requirements-vercel.txt file
 if [ -f "requirements-vercel.txt" ]; then
     echo "   ✓ requirements-vercel.txt found"

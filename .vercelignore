@@ -1,0 +1,43 @@
+# Ignore files not needed for Vercel deployment
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Bot storage directory
+.social_media_bot/
+
+# Temporary directories
+/tmp
+/temp
+
+# Version control
+.git
+.gitignore
+
+# Development files
+*.log
+*.sqlite
+.vscode/
+.idea/
+
+# Backup files
+*.bak
+*~
+*.swp
+
+# Extra scripts and files not needed in production
+prepare_vercel_deployment.py
+*_local.py
+test_*.py
+tests/
+
+# Ignore development versions of files
+*.dev.*
