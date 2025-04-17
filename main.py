@@ -23,9 +23,15 @@ def run_bot():
     """Initialize and start the Telegram bot."""
     global is_bot_running
     
+    # Create a log file for debugging
+    with open('/tmp/bot_debug.log', 'w') as f:
+        f.write(f"Bot startup: {__name__} at {os.path.abspath(__file__)}\n")
+    
     # Avoid running multiple instances
     if is_bot_running:
         logger.warning("Bot is already running, skipping additional instance")
+        with open('/tmp/bot_debug.log', 'a') as f:
+            f.write("Bot is already running, skipping additional instance\n")
         return
         
     # Load environment variables
@@ -33,24 +39,47 @@ def run_bot():
     
     # Get the token from environment variables
     token = os.getenv("TELEGRAM_BOT_TOKEN")
+    token_preview = token[:6] + '...' if token else 'None'
+    with open('/tmp/bot_debug.log', 'a') as f:
+        f.write(f"Token: {token_preview}\n")
+    
     if not token:
         logger.error("No bot token provided. Set the TELEGRAM_BOT_TOKEN environment variable.")
+        with open('/tmp/bot_debug.log', 'a') as f:
+            f.write("No bot token provided\n")
         return
     
-    # Create and start the bot
-    bot = create_bot(token)
-    logger.info("Bot created successfully, starting...")
     try:
+        # Create and start the bot
+        with open('/tmp/bot_debug.log', 'a') as f:
+            f.write("Creating bot...\n")
+        bot = create_bot(token)
+        logger.info("Bot created successfully, starting...")
+        with open('/tmp/bot_debug.log', 'a') as f:
+            f.write("Bot created successfully, starting...\n")
+        
         # Mark as running
         is_bot_running = True
+        
         # Start the bot with polling
+        with open('/tmp/bot_debug.log', 'a') as f:
+            f.write("Starting bot polling...\n")
         start_bot(bot)
+        
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
+        with open('/tmp/bot_debug.log', 'a') as f:
+            f.write("Bot stopped by user\n")
     except Exception as e:
         logger.error(f"Error running bot: {e}")
+        with open('/tmp/bot_debug.log', 'a') as f:
+            f.write(f"Error running bot: {str(e)}\n")
+            import traceback
+            f.write(traceback.format_exc())
     finally:
         is_bot_running = False
+        with open('/tmp/bot_debug.log', 'a') as f:
+            f.write("Bot stopped\n")
 
 # Only start the bot when this file is run directly
 if __name__ == '__main__':
