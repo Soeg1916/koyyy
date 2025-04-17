@@ -22,16 +22,23 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # Configure yt-dlp options
 YDL_OPTIONS = {
-    'format': 'best',
+    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
     'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
     'noplaylist': True,
-    'quiet': True,
-    'no_warnings': True,
-    'ignoreerrors': True,
+    'quiet': False,  # Set to False to see more debugging info
+    'no_warnings': False,  # Set to False to see warnings
+    'ignoreerrors': False,  # Set to False to see errors
     'nocheckcertificate': True,
     'restrictfilenames': True,
-    'logtostderr': False,
-    'verbose': False,
+    'logtostderr': True,  # Log to stderr for debugging
+    'verbose': True,  # Enable verbose output for debugging
+    'socket_timeout': 30,  # Increase timeout
+    'retries': 10,  # Increase number of retries
+    'cachedir': False,  # Disable cache
+    'prefer_insecure': True,  # Try HTTP if HTTPS fails
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    },
 }
 
 async def download_video(url):
@@ -53,16 +60,53 @@ async def download_video(url):
         parsed_url = urllib.parse.urlparse(url)
         domain = parsed_url.netloc.lower()
         
+        # Special handling for TikTok
         if 'tiktok' in domain:
             logger.info("Detected TikTok URL")
+            
+            # Normalize TikTok URL if it's a shortened one (vm.tiktok.com)
+            if 'vm.tiktok.com' in domain:
+                logger.info("Converting shortened TikTok URL to full URL")
+                try:
+                    import requests
+                    response = requests.head(url, allow_redirects=True)
+                    if response.status_code == 200:
+                        url = response.url
+                        logger.info(f"Resolved to: {url}")
+                        # Re-parse the URL after redirection
+                        parsed_url = urllib.parse.urlparse(url)
+                except Exception as e:
+                    logger.warning(f"Error following TikTok redirect: {e}")
+            
+            # Try a different approach for TikTok - use browser simulation
             options.update({
-                'cookiesfrombrowser': ('chrome',),  # Extract cookies from browser
+                # Use an alternative extractor
+                'extractor_retries': 3,
+                'extractor_args': {
+                    'tiktok': {
+                        'embed_api': 'tikwm',  # Try different API endpoints
+                        'api_hostname': 'www.tikwm.com',
+                        'force_api_response': 'yes'
+                    }
+                },
+                'referer': 'https://www.tiktok.com/',
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1'
+                }
             })
             
         elif 'instagram' in domain:
             logger.info("Detected Instagram URL")
             options.update({
-                'cookiesfrombrowser': ('chrome',),  # Extract cookies from browser
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Referer': 'https://www.instagram.com/'
+                }
             })
             
         elif 'youtube' in domain or 'youtu.be' in domain:
@@ -72,7 +116,11 @@ async def download_video(url):
         elif 'pinterest' in domain:
             logger.info("Detected Pinterest URL")
             options.update({
-                'cookiesfrombrowser': ('chrome',),  # Extract cookies from browser
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Referer': 'https://www.pinterest.com/'
+                }
             })
             
         # Generate a unique filename based on timestamp to prevent conflicts
@@ -106,6 +154,19 @@ async def download_video(url):
         # Run the download in a separate thread to avoid blocking
         loop = asyncio.get_event_loop()
         video_path = await loop.run_in_executor(None, download)
+        
+        # If TikTok download failed, try a fallback method
+        if (not video_path or not os.path.exists(video_path)) and 'tiktok' in domain:
+            logger.info("Initial TikTok download failed, trying fallback method...")
+            
+            # Try fallback method with a different API
+            options['extractor_args']['tiktok'] = {
+                'embed_api': 'musicaldown',
+                'api_hostname': 'musicaldown.com',
+                'force_mobile_api': 'yes'
+            }
+            
+            video_path = await loop.run_in_executor(None, download)
         
         if not video_path or not os.path.exists(video_path):
             logger.error(f"Download failed for {url}")

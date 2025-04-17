@@ -13,5 +13,7 @@ dependencies = [
     "pytelegrambotapi>=4.26.0",
     "python-dotenv>=1.1.0",
     "python-telegram-bot==13.7",
+    "requests>=2.32.3",
+    "trafilatura>=2.0.0",
     "yt-dlp>=2025.3.31",
 ]
