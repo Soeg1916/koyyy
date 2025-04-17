@@ -167,12 +167,20 @@ def create_bot(token):
         url = message.text
         user_id = message.from_user.id
         
-        # Let the user know we're working on it
-        status_message = bot.send_message(message.chat.id, "🔄 Processing your request. This may take a moment...")
-        
         # Determine the media type (video or image)
         media_type, platform = get_url_type(url)
         logger.info(f"Detected URL type: {media_type} from {platform}")
+        
+        # Check if this is a group chat
+        is_group = message.chat.type in ['group', 'supergroup']
+        
+        # In group chats, only process messages from specific platforms
+        if is_group and platform not in ['tiktok', 'instagram', 'pinterest']:
+            logger.info(f"Ignoring URL in group chat: platform {platform} not supported for groups")
+            return
+            
+        # Let the user know we're working on it
+        status_message = bot.send_message(message.chat.id, "🔄 Processing your request. This may take a moment...")
         
         # Use a thread to handle the download process
         def download_thread():
