@@ -53,7 +53,7 @@ def webhook():
     else:
         return jsonify({"status": "error", "message": "Invalid content type"})
 
-@app.route('/set_webhook', methods=['GET'])
+@app.route('/set-webhook', methods=['GET'])
 def set_webhook():
     """Set the webhook URL for the bot."""
     try:

@@ -83,3 +83,8 @@ def set_webhook():
         logger.error(f"Error setting webhook: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+
+# For Vercel serverless functions
+def handler(event, context):
+    """Handler for Vercel serverless functions."""
+    return app(event['body'], event['headers'])

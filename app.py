@@ -11,7 +11,14 @@ app.secret_key = os.environ.get("SESSION_SECRET", "default-secret-key")
 @app.route('/')
 def index():
     """Home page - provides information about the Telegram bot."""
-    return render_template('index.html')
+    # Get bot username from environment if available
+    bot_username = os.environ.get("BOT_USERNAME", "YourBotUsername")
+    return render_template('index.html', bot_username=bot_username)
+
+# For Vercel serverless functions
+def handler(event, context):
+    """Handler for Vercel serverless functions."""
+    return app(event['body'], event['headers'])
 
 # This file is meant to be imported by main.py when run through the gunicorn server
 # If run directly, start the development server
