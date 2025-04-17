@@ -1,0 +1,33 @@
+"""
+Flask web application for the Telegram bot information page.
+For Vercel deployment.
+"""
+import os
+from flask import Flask, render_template, jsonify
+
+# Initialize Flask app
+app = Flask(__name__, 
+           static_folder="static",
+           template_folder="templates")
+
+# Set secret key
+app.secret_key = os.environ.get("SESSION_SECRET", "development_secret_key")
+
+@app.route('/')
+def index():
+    """Home page - provides information about the Telegram bot."""
+    return render_template('index.html')
+
+@app.route('/health')
+def health():
+    """Health check endpoint."""
+    return jsonify({"status": "healthy"})
+
+# For serverless function handler
+def handler(request, context):
+    """Handle requests in a serverless context."""
+    return app(request['env'], request['start_response'])
+
+# For local development
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
