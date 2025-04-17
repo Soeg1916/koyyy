@@ -189,3 +189,66 @@ def get_user_media_list(user_id):
     except Exception as e:
         logger.error(f"Error getting user media list: {str(e)}")
         return []
+
+def delete_media(user_id, name):
+    """
+    Delete a saved media file for a specific user.
+    
+    Args:
+        user_id (int): Telegram user ID
+        name (str): Name of the saved media to delete
+        
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
+    try:
+        # Get user data
+        user_data = _get_user_data()
+        
+        # Check if user exists
+        if str(user_id) not in user_data:
+            logger.warning(f"No data found for user {user_id}")
+            return False
+        
+        # Check if the media name exists
+        user_media = user_data[str(user_id)]
+        found_name = None
+        
+        # Try to find the media by exact name or case-insensitive match
+        name_lower = name.lower()
+        
+        if name in user_media:
+            found_name = name
+        else:
+            # Try case-insensitive search
+            for saved_name in user_media.keys():
+                if saved_name.lower() == name_lower:
+                    found_name = saved_name
+                    break
+        
+        if not found_name:
+            logger.warning(f"Media '{name}' not found for user {user_id}")
+            return False
+        
+        # Get file path
+        media_info = user_media[found_name]
+        user_dir = _get_user_dir(user_id)
+        file_path = os.path.join(user_dir, media_info["path"])
+        
+        # Delete the file if it exists
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Deleted file: {file_path}")
+        else:
+            logger.warning(f"File not found: {file_path}")
+        
+        # Remove the entry from user data
+        del user_data[str(user_id)][found_name]
+        _save_user_data(user_data)
+        
+        logger.info(f"Deleted media '{found_name}' for user {user_id}")
+        return True
+    
+    except Exception as e:
+        logger.error(f"Error deleting media: {str(e)}")
+        return False

@@ -16,6 +16,7 @@ from user_storage import (
     save_media,
     retrieve_media,
     get_user_media_list,
+    delete_media,
     initialize_user_storage,
 )
 from utils import is_valid_url, get_media_type, get_url_type, sanitize_filename
@@ -56,7 +57,8 @@ def create_bot(token):
             "Commands:\n"
             "/help - Show help information\n"
             "/list - List your saved media\n"
-            "/my [name] - Retrieve your saved media by name"
+            "/my [name] - Retrieve your saved media by name\n"
+            "/delete [name] - Delete your saved media by name"
         )
         bot.reply_to(message, welcome_message)
     
@@ -137,6 +139,24 @@ def create_bot(token):
         elif media_type == "image":
             with open(file_path, 'rb') as image_file:
                 bot.send_photo(message.chat.id, image_file, caption=f"Your saved image: {media_name}")
+    
+    @bot.message_handler(commands=['delete'])
+    def delete_command(message):
+        """Handler for /delete [name] command"""
+        user_id = message.from_user.id
+        command_args = message.text.split(' ', 1)
+        
+        if len(command_args) < 2:
+            bot.reply_to(message, "Please provide a name. Usage: /delete [name]")
+            return
+        
+        media_name = command_args[1].strip()
+        success = delete_media(user_id, media_name)
+        
+        if success:
+            bot.reply_to(message, f"✅ Media '{media_name}' has been deleted successfully.")
+        else:
+            bot.reply_to(message, f"❌ No media found with the name '{media_name}' or deletion failed.")
     
     @bot.message_handler(func=lambda message: is_valid_url(message.text))
     def handle_url_message(message):
