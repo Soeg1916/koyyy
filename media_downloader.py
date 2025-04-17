@@ -780,12 +780,84 @@ async def download_video(url):
             if not video_path or not os.path.exists(video_path):
                 logger.info("Second fallback: Trying direct download method for TikTok...")
                 try:
-                    direct_video_path = await download_tiktok_direct(url)
-                    if direct_video_path and os.path.exists(direct_video_path):
-                        video_path = direct_video_path
+                    # Simple implementation to avoid any dependency issues
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept': '*/*',
+                        'Referer': 'https://www.tiktok.com/',
+                    }
+                    
+                    # Try to get the video page
+                    response = requests.get(url, headers=headers, timeout=30)
+                    if response.status_code == 200:
+                        # Look for video URLs in the page
+                        video_pattern = r'(https://[^"\']+\.mp4[^"\']*)'
+                        matches = re.findall(video_pattern, response.text)
+                        
+                        for match in matches:
+                            try:
+                                video_url = match.replace('\\u002F', '/').replace('\\/', '/')
+                                logger.info(f"Found direct video URL: {video_url}")
+                                
+                                # Download the video
+                                timestamp = int(time.time())
+                                output_path = os.path.join(DOWNLOAD_DIR, f"tiktok_fallback_{timestamp}.mp4")
+                                
+                                with requests.get(video_url, stream=True, headers=headers, timeout=60) as dl_response:
+                                    if dl_response.status_code == 200:
+                                        with open(output_path, 'wb') as f:
+                                            for chunk in dl_response.iter_content(chunk_size=8192):
+                                                f.write(chunk)
+                                        
+                                        if os.path.getsize(output_path) > 10000:  # Check file is not empty
+                                            logger.info(f"Successfully downloaded TikTok video directly: {output_path}")
+                                            video_path = output_path
+                                            break
+                            except Exception as e:
+                                logger.warning(f"Error downloading from found URL: {e}")
+                
                 except Exception as e:
                     logger.error(f"Error in direct TikTok download: {e}")
-        
+            
+            # Last resort - try with a completely different method using a different API
+            if not video_path or not os.path.exists(video_path):
+                logger.info("Third fallback: Trying TikTok download with SaveFrom API...")
+                try:
+                    savefrom_url = f"https://en.savefrom.net/download-from-tiktok/#url={url}"
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Referer': 'https://www.google.com/'
+                    }
+                    
+                    response = requests.get(savefrom_url, headers=headers)
+                    if response.status_code == 200:
+                        video_pattern = r'(https://[^"\']+\.mp4[^"\']*)'
+                        matches = re.findall(video_pattern, response.text)
+                        
+                        for match in matches:
+                            try:
+                                timestamp = int(time.time())
+                                output_path = os.path.join(DOWNLOAD_DIR, f"tiktok_savefrom_{timestamp}.mp4")
+                                
+                                with requests.get(match, stream=True, headers=headers, timeout=60) as dl_response:
+                                    if dl_response.status_code == 200:
+                                        with open(output_path, 'wb') as f:
+                                            for chunk in dl_response.iter_content(chunk_size=8192):
+                                                f.write(chunk)
+                                                
+                                        if os.path.getsize(output_path) > 10000:
+                                            logger.info(f"Successfully downloaded TikTok video with SaveFrom: {output_path}")
+                                            video_path = output_path
+                                            break
+                            except Exception as e:
+                                logger.warning(f"Error with SaveFrom API download: {e}")
+                                continue
+                except Exception as e:
+                    logger.error(f"Error in SaveFrom TikTok download: {e}")
+                    
         if not video_path or not os.path.exists(video_path):
             logger.error(f"Download failed for {url}")
             return None
